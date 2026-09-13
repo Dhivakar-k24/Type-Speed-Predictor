@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Type Speed Predictor</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+<div class="app">
+
+  <header class="app-header">
+    <div class="logo">&#9000; TypeSpeed</div>
+    <nav class="tabs">
+      <button class="tab active" onclick="showTab('typing', this)">Typing</button>
+      <button class="tab" onclick="showTab('history', this)">History</button>
+      <button class="tab" onclick="showTab('stats', this)">Stats</button>
+    </nav>
+  </header>
+
+  <!-- TYPING TAB -->
+  <section id="tab-typing" class="tab-content active">
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">WPM</div>
+        <div class="stat-value green" id="wpm">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Words</div>
+        <div class="stat-value" id="word-count">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Spaces</div>
+        <div class="stat-value" id="space-count">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Chars</div>
+        <div class="stat-value" id="char-count">0</div>
+      </div>
+    </div>
+
+    <div class="editor-wrap">
+      <textarea id="editor"
+        placeholder="Start typing here... repeated words (used 2+ times) will be suggested after 3 characters. Press Tab to autocomplete."
+        spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      <div class="suggest-box" id="suggest"></div>
+    </div>
+
+    <div class="predict-bar">
+      <span>&#129302;</span>
+      <span id="predict-val">Type at least 20 words to see your predicted speed level.</span>
+    </div>
+
+    <div class="freq-section" id="freq-section" style="display:none">
+      <div class="freq-title">Repeated words</div>
+      <div class="freq-list" id="freq-list"></div>
+    </div>
+
+    <div class="action-row">
+      <button class="btn primary"  onclick="saveSession()">Save Session</button>
+      <button class="btn accent"   onclick="runMLPredict()">Predict WPM</button>
+      <button class="btn accent2"  onclick="runClassify()">Classify Speed</button>
+      <button class="btn"          onclick="resetAll()">Reset</button>
+    </div>
+
+    <div id="save-msg" class="save-msg" style="display:none"></div>
+
+    <!-- Regression panel -->
+    <div class="ml-panel" id="ml-panel" style="display:none">
+      <div class="ml-header">
+        <span class="ml-badge">RandomForestRegressor - WPM Prediction</span>
+        <span id="ml-status-dot" class="ml-dot"></span>
+      </div>
+      <div class="ml-body">
+        <div class="ml-stat">
+          <div class="ml-label">Predicted WPM</div>
+          <div class="ml-value" id="ml-wpm">--</div>
+        </div>
+        <div class="ml-stat">
+          <div class="ml-label">Confidence Range</div>
+          <div class="ml-value small" id="ml-range">--</div>
+        </div>
+        <div class="ml-stat">
+          <div class="ml-label">Speed Level</div>
+          <div class="ml-value small" id="ml-label">--</div>
+        </div>
+      </div>
+      <div id="ml-msg" class="ml-msg"></div>
+    </div>
+
+    <!-- Classifier panel -->
+    <div class="clf-panel" id="clf-panel" style="display:none">
+      <div class="clf-header">
+        <span class="ml-badge" id="clf-model-badge">Classifier</span>
+        <span id="clf-dot" class="ml-dot"></span>
+      </div>
+      <div class="clf-main">
+        <div class="clf-class-display">
+          <span class="clf-emoji" id="clf-emoji">--</span>
+          <span class="clf-class-name" id="clf-class-name">--</span>
+          <span class="clf-range" id="clf-range">--</span>
+        </div>
+        <div class="clf-confidence">
+          <div class="clf-conf-label">Confidence</div>
+          <div class="clf-conf-bar-wrap">
+            <div class="clf-conf-bar" id="clf-conf-bar" style="width:0%"></div>
+          </div>
+          <div class="clf-conf-pct" id="clf-conf-pct">0%</div>
+        </div>
+      </div>
+      <div class="clf-probs" id="clf-probs"></div>
+      <div id="clf-msg" class="ml-msg"></div>
+    </div>
+
+  </section>
+
+  <!-- HISTORY TAB -->
+  <section id="tab-history" class="tab-content">
+    <div class="section-header">
+      <h2>Recent Sessions</h2>
+      <button class="btn small" onclick="loadHistory()">Refresh</button>
+    </div>
+    <div id="history-list"><p class="muted">Loading...</p></div>
+  </section>
+
+  <!-- STATS TAB -->
+  <section id="tab-stats" class="tab-content">
+    <div class="section-header">
+      <h2>Overall Stats</h2>
+      <button class="btn small" onclick="loadStats()">Refresh</button>
+    </div>
+    <div id="stats-content"><p class="muted">Loading...</p></div>
+
+    <div class="train-card">
+      <div class="train-info">
+        <div class="train-title">Train WPM Regressor</div>
+        <div class="train-sub">RandomForestRegressor - predicts your exact WPM number. Need 5+ sessions.</div>
+      </div>
+      <button class="btn accent" onclick="trainModel()" id="train-btn">Train</button>
+    </div>
+    <div id="train-result" style="display:none"></div>
+
+    <div class="train-card" style="margin-top:0.75rem">
+      <div class="train-info">
+        <div class="train-title">Train Speed Classifier</div>
+        <div class="train-sub">KNN vs RandomForest - auto-selects best. Labels you Beginner to Expert. Need 5+ sessions.</div>
+      </div>
+      <button class="btn accent2" onclick="trainClassifier()" id="clf-train-btn">Train</button>
+    </div>
+    <div id="clf-train-result" style="display:none"></div>
+  </section>
+
+</div>
+
+<script>
+// ── State ────────────────────────────────────
+let startTime=null, wordFreq={}, wpmHistory=[], currentWPM=0, currentDuration=0;
+const editor=document.getElementById('editor');
+const suggestEl=document.getElementById('suggest');
+const wpmEl=document.getElementById('wpm');
+const wordEl=document.getElementById('word-count');
+const spaceEl=document.getElementById('space-count');
+const charEl=document.getElementById('char-count');
+const predictVal=document.getElementById('predict-val');
+const freqSection=document.getElementById('freq-section');
+const freqList=document.getElementById('freq-list');
+const saveMsg=document.getElementById('save-msg');
+
+// ── Helpers ──────────────────────────────────
+function getWords(t){ return t.trim().split(/\s+/).filter(w=>w.length>0); }
+function getCurrentWord(t){ const p=t.split(/\s/); return p[p.length-1]||''; }
+
+function updateFreq(words){
+  wordFreq={};
+  for(const w of words){
+    const k=w.toLowerCase().replace(/[^a-z0-9']/g,'');
+    if(k) wordFreq[k]=(wordFreq[k]||0)+1;
+  }
+}
+
+function findSuggestion(partial){
+  if(partial.length<3) return null;
+  const lower=partial.toLowerCase();
+  let best=null, bestCount=0;
+  for(const [word,count] of Object.entries(wordFreq)){
+    if(count>=2 && word.toLowerCase().startsWith(lower) && word.toLowerCase()!==lower){
+      if(count>bestCount){ best=word; bestCount=count; }
+    }
+  }
+  return best;
+}
+
+function smoothWPM(raw){
+  wpmHistory.push(raw);
+  if(wpmHistory.length>5) wpmHistory.shift();
+  return Math.round(wpmHistory.reduce((a,b)=>a+b,0)/wpmHistory.length);
+}
+
+function predictLabel(wpm,wc){
+  if(wc<20) return 'Type at least 20 words to see your predicted speed level.';
+  if(wpm<20) return wpm+' WPM - Beginner pace. Keep practising!';
+  if(wpm<40) return wpm+' WPM - Average typist. Getting there!';
+  if(wpm<60) return wpm+' WPM - Above average. Nice work!';
+  if(wpm<80) return wpm+' WPM - Proficient typist. Solid speed!';
+  if(wpm<100) return wpm+' WPM - Fast typist. Impressive!';
+  return wpm+' WPM - Expert / touch typist!';
+}
+
+function getSuggestPos(){
+  const ta=editor;
+  const style=getComputedStyle(ta);
+  const lh=parseFloat(style.lineHeight)||26;
+  const pt=parseFloat(style.paddingTop)||16;
+  const pl=parseFloat(style.paddingLeft)||16;
+  const text=ta.value.substring(0,ta.selectionStart);
+  const lines=text.split('\n');
+  const lineIdx=lines.length-1;
+  const col=lines[lineIdx].length;
+  let left=pl+col*8.8;
+  let top=pt+lineIdx*lh+lh;
+  const taW=ta.offsetWidth;
+  if(left>taW-180) left=taW-180;
+  return{left:left+'px',top:top+'px'};
+}
+
+function renderFreq(){
+  const repeated=Object.entries(wordFreq).filter(([,c])=>c>=2).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  if(!repeated.length){ freqSection.style.display='none'; return; }
+  freqSection.style.display='block';
+  freqList.innerHTML=repeated.map(([w,c])=>'<span class="freq-pill">'+w+'<span class="freq-cnt">'+c+'</span></span>').join('');
+}
+
+// ── Editor Events ─────────────────────────────
+editor.addEventListener('keydown', e=>{
+  if(e.key==='Tab'){
+    const text=editor.value;
+    const partial=getCurrentWord(text);
+    const sug=findSuggestion(partial);
+    if(sug){
+      e.preventDefault();
+      const before=text.slice(0,text.length-partial.length);
+      editor.value=before+sug+' ';
+      suggestEl.style.display='none';
+      editor.dispatchEvent(new Event('input'));
+    }
+  }
+});
+
+editor.addEventListener('input',()=>{
+  const text=editor.value;
+  if(text.length>0 && !startTime) startTime=Date.now();
+  if(text.length===0){ startTime=null; wpmHistory=[]; }
+
+  const words=getWords(text);
+  const wc=words.length;
+  const spaces=(text.match(/ /g)||[]).length;
+
+  wordEl.textContent=wc;
+  spaceEl.textContent=spaces;
+  charEl.textContent=text.length;
+
+  updateFreq(words);
+  renderFreq();
+
+  const partial=getCurrentWord(text);
+  const sug=partial.length>=3?findSuggestion(partial):null;
+  if(sug){
+    const pos=getSuggestPos();
+    suggestEl.style.left=pos.left;
+    suggestEl.style.top=pos.top;
+    suggestEl.style.display='flex';
+    suggestEl.innerHTML='<span class="sug-word">'+sug+'</span><span class="sug-tab">Tab</span>';
+  } else { suggestEl.style.display='none'; }
+
+  if(startTime && wc>0){
+    const elapsed=(Date.now()-startTime)/60000;
+    currentDuration=(Date.now()-startTime)/1000;
+    const raw=Math.round(wc/elapsed);
+    const smooth=smoothWPM(raw);
+    currentWPM=smooth;
+    wpmEl.textContent=smooth;
+    predictVal.textContent=predictLabel(smooth,wc);
+  }
+});
+
+editor.addEventListener('blur',()=>{ suggestEl.style.display='none'; });
+
+// ── Save Session ──────────────────────────────
+async function saveSession(){
+  const text=editor.value;
+  const words=getWords(text);
+  if(words.length<5){ showSaveMsg('Type at least 5 words before saving!',false); return; }
+  const spaces=(text.match(/ /g)||[]).length;
+  const topWords=Object.entries(wordFreq).filter(([,c])=>c>=2).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([w,c])=>w+'('+c+')').join(', ');
+  try{
+    const res=await fetch('/api/session',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({wpm:currentWPM,word_count:words.length,space_count:spaces,char_count:text.length,duration_seconds:Math.round(currentDuration),top_words:topWords})});
+    const d=await res.json();
+    if(d.success) showSaveMsg('Session saved! (ID #'+d.session_id+')',true);
+    else showSaveMsg('Error: '+(d.error||'Unknown error'),false);
+  } catch{ showSaveMsg('Could not connect to server.',false); }
+}
+
+function showSaveMsg(msg,ok){
+  saveMsg.textContent=msg;
+  saveMsg.className='save-msg '+(ok?'ok':'err');
+  saveMsg.style.display='block';
+  setTimeout(()=>{ saveMsg.style.display='none'; },3000);
+}
+
+function resetAll(){
+  editor.value=''; startTime=null; wpmHistory=[]; currentWPM=0; currentDuration=0; wordFreq={};
+  wpmEl.textContent='0'; wordEl.textContent='0'; spaceEl.textContent='0'; charEl.textContent='0';
+  predictVal.textContent='Type at least 20 words to see your predicted speed level.';
+  suggestEl.style.display='none'; freqSection.style.display='none'; saveMsg.style.display='none';
+  document.getElementById('ml-panel').style.display='none';
+  document.getElementById('clf-panel').style.display='none';
+  editor.focus();
+}
+
+// ── Regression Predict ────────────────────────
+async function runMLPredict(){
+  const text=editor.value; const words=getWords(text);
+  if(words.length<5){ showSaveMsg('Type at least 5 words first!',false); return; }
+  const panel=document.getElementById('ml-panel');
+  const msg=document.getElementById('ml-msg');
+  panel.style.display='block'; msg.textContent='Running prediction...';
+  document.getElementById('ml-wpm').textContent='...';
+  document.getElementById('ml-range').textContent='...';
+  document.getElementById('ml-label').textContent='...';
+  const spaces=(text.match(/ /g)||[]).length;
+  try{
+    const res=await fetch('/api/predict',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({char_count:text.length,word_count:words.length,space_count:spaces,duration_seconds:Math.max(currentDuration,1)})});
+    const d=await res.json();
+    if(d.success){
+      document.getElementById('ml-wpm').textContent=d.predicted_wpm;
+      document.getElementById('ml-range').textContent=d.confidence_range;
+      document.getElementById('ml-label').textContent=d.label;
+      document.getElementById('ml-status-dot').style.background='#1db97a';
+      msg.textContent='';
+    } else { msg.textContent='Warning: '+d.error; document.getElementById('ml-status-dot').style.background='#e25c5c'; }
+  } catch{ msg.textContent='Error: Could not connect to server.'; }
+}
+
+// ── Train Regressor ───────────────────────────
+async function trainModel(){
+  const btn=document.getElementById('train-btn');
+  const el=document.getElementById('train-result');
+  btn.textContent='Training...'; btn.disabled=true; el.style.display='none';
+  try{
+    const res=await fetch('/api/train',{method:'POST'});
+    const d=await res.json();
+    el.style.display='block';
+    if(d.success){
+      const top=Object.entries(d.feature_importances).sort((a,b)=>b[1]-a[1])[0][0];
+      el.innerHTML='<div class="train-result ok">'+
+        '<div class="tr-row"><span>Status</span><span>Trained OK</span></div>'+
+        '<div class="tr-row"><span>Sessions used</span><span>'+d.sessions_used+'</span></div>'+
+        '<div class="tr-row"><span>MAE</span><span>'+d.mae+' WPM</span></div>'+
+        '<div class="tr-row"><span>R2 Score</span><span>'+d.r2+'</span></div>'+
+        '<div class="tr-row"><span>Top Feature</span><span>'+top+'</span></div>'+
+        '</div>';
+    } else { el.innerHTML='<div class="train-result err">Warning: '+d.error+'</div>'; }
+  } catch{ el.innerHTML='<div class="train-result err">Error: Server error.</div>'; }
+  btn.textContent='Train'; btn.disabled=false;
+}
+
+// ── History ───────────────────────────────────
+async function loadHistory(){
+  const el=document.getElementById('history-list');
+  el.innerHTML='<p class="muted">Loading...</p>';
+  try{
+    const res=await fetch('/api/sessions?limit=20');
+    const data=await res.json();
+    if(!data.sessions.length){ el.innerHTML='<p class="muted">No sessions yet. Go type something!</p>'; return; }
+    el.innerHTML='<table class="history-table"><thead><tr><th>#</th><th>WPM</th><th>Words</th><th>Spaces</th><th>Chars</th><th>Duration</th><th>Top Words</th><th>Date</th><th></th></tr></thead><tbody>'+
+      data.sessions.map(s=>'<tr><td class="muted">'+s.id+'</td><td class="green bold">'+s.wpm+'</td><td>'+s.word_count+'</td><td>'+s.space_count+'</td><td>'+s.char_count+'</td><td>'+s.duration_seconds+'s</td><td class="muted small">'+(s.top_words||'--')+'</td><td class="muted small">'+s.created_at+'</td><td><button class="btn small danger" onclick="deleteSession('+s.id+')">x</button></td></tr>').join('')+
+      '</tbody></table>';
+  } catch{ el.innerHTML='<p class="muted">Failed to load sessions.</p>'; }
+}
+
+async function deleteSession(id){
+  if(!confirm('Delete session #'+id+'?')) return;
+  await fetch('/api/session/'+id,{method:'DELETE'});
+  loadHistory();
+}
+
+// ── Stats ─────────────────────────────────────
+async function loadStats(){
+  const el=document.getElementById('stats-content');
+  el.innerHTML='<p class="muted">Loading...</p>';
+  try{
+    const res=await fetch('/api/stats');
+    const s=await res.json();
+    if(!s.total_sessions){ el.innerHTML='<p class="muted">No sessions yet. Save a session first!</p>'; return; }
+    el.innerHTML='<div class="stats-grid">'+
+      '<div class="stat-card"><div class="stat-label">Total Sessions</div><div class="stat-value">'+s.total_sessions+'</div></div>'+
+      '<div class="stat-card"><div class="stat-label">Avg WPM</div><div class="stat-value green">'+s.avg_wpm+'</div></div>'+
+      '<div class="stat-card"><div class="stat-label">Best WPM</div><div class="stat-value green">'+s.best_wpm+'</div></div>'+
+      '<div class="stat-card"><div class="stat-label">Total Words</div><div class="stat-value">'+s.total_words_typed+'</div></div>'+
+      '</div>'+
+      '<div class="progress-wrap"><p class="muted small">Best WPM vs expert threshold (150)</p>'+
+      '<div class="progress-bar"><div class="progress-fill" style="width:'+Math.min(s.best_wpm,150)/150*100+'%"></div></div>'+
+      '<p class="muted small">'+s.best_wpm+' / 150 WPM</p></div>';
+  } catch{ el.innerHTML='<p class="muted">Failed to load stats.</p>'; }
+}
+
+// ── Tab switching ─────────────────────────────
+function showTab(name,btn){
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  btn.classList.add('active');
+  if(name==='history') loadHistory();
+  if(name==='stats') loadStats();
+}
+</script>
+<script src="{{ url_for('static', filename='classifier.js') }}"></script>
+</body>
+</html>
